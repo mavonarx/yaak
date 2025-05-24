@@ -4,7 +4,6 @@ import { format } from 'date-fns';
 import { hexy } from 'hexy';
 import { useAtomValue } from 'jotai';
 import { useMemo, useRef, useState } from 'react';
-import { useCopy } from '../hooks/useCopy';
 import { useFormatText } from '../hooks/useFormatText';
 import {
   activeWebsocketConnectionAtom,
@@ -14,6 +13,7 @@ import {
 } from '../hooks/usePinnedWebsocketConnection';
 import { useStateWithDeps } from '../hooks/useStateWithDeps';
 import { languageFromContentType } from '../lib/contentType';
+import { copyToClipboard } from '../lib/copy';
 import { AutoScroller } from './core/AutoScroller';
 import { Banner } from './core/Banner';
 import { Button } from './core/Button';
@@ -27,6 +27,7 @@ import { SplitLayout } from './core/SplitLayout';
 import { HStack, VStack } from './core/Stacks';
 import { WebsocketStatusTag } from './core/WebsocketStatusTag';
 import { EmptyStateText } from './EmptyStateText';
+import { ErrorBoundary } from './ErrorBoundary';
 import { RecentWebsocketConnectionsDropdown } from './RecentWebsocketConnectionsDropdown';
 
 interface Props {
@@ -41,7 +42,6 @@ export function WebsocketResponsePane({ activeRequest }: Props) {
 
   const activeConnection = useAtomValue(activeWebsocketConnectionAtom);
   const connections = useAtomValue(activeWebsocketConnectionsAtom);
-
   const events = useWebsocketEvents(activeConnection?.id ?? null);
 
   const activeEvent = useMemo(
@@ -63,7 +63,6 @@ export function WebsocketResponsePane({ activeRequest }: Props) {
 
   const language = languageFromContentType(null, message);
   const formattedMessage = useFormatText({ language, text: message, pretty: true });
-  const copy = useCopy();
 
   return (
     <SplitLayout
@@ -95,27 +94,29 @@ export function WebsocketResponsePane({ activeRequest }: Props) {
                 />
               </HStack>
             </HStack>
-            <AutoScroller
-              data={events}
-              header={
-                activeConnection.error && (
-                  <Banner color="danger" className="m-3">
-                    {activeConnection.error}
-                  </Banner>
-                )
-              }
-              render={(event) => (
-                <EventRow
-                  key={event.id}
-                  event={event}
-                  isActive={event.id === activeEventId}
-                  onClick={() => {
-                    if (event.id === activeEventId) setActiveEventId(null);
-                    else setActiveEventId(event.id);
-                  }}
-                />
-              )}
-            />
+            <ErrorBoundary name="Websocket Events">
+              <AutoScroller
+                data={events}
+                header={
+                  activeConnection.error && (
+                    <Banner color="danger" className="m-3">
+                      {activeConnection.error}
+                    </Banner>
+                  )
+                }
+                render={(event) => (
+                  <EventRow
+                    key={event.id}
+                    event={event}
+                    isActive={event.id === activeEventId}
+                    onClick={() => {
+                      if (event.id === activeEventId) setActiveEventId(null);
+                      else setActiveEventId(event.id);
+                    }}
+                  />
+                )}
+              />
+            </ErrorBoundary>
           </div>
         )
       }
@@ -151,7 +152,7 @@ export function WebsocketResponsePane({ activeRequest }: Props) {
                           title="Copy message"
                           icon="copy"
                           size="xs"
-                          onClick={() => copy(formattedMessage.data ?? '')}
+                          onClick={() => copyToClipboard(formattedMessage.data ?? '')}
                         />
                       </HStack>
                     )}

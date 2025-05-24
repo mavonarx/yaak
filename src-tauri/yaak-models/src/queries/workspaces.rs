@@ -1,10 +1,12 @@
 use crate::db_context::DbContext;
 use crate::error::Result;
 use crate::models::{
-    Folder, FolderIden, GrpcRequest, GrpcRequestIden, HttpRequest, HttpRequestIden,
-    WebsocketRequest, WebsocketRequestIden, Workspace, WorkspaceIden,
+    EnvironmentIden, FolderIden, GrpcRequestIden, HttpRequestHeader, HttpRequestIden,
+    WebsocketRequestIden, Workspace, WorkspaceIden,
 };
 use crate::util::UpdateSource;
+use serde_json::Value;
+use std::collections::BTreeMap;
 
 impl<'a> DbContext<'a> {
     pub fn get_workspace(&self, id: &str) -> Result<Workspace> {
@@ -34,24 +36,26 @@ impl<'a> DbContext<'a> {
         workspace: &Workspace,
         source: &UpdateSource,
     ) -> Result<Workspace> {
-        for m in self.find_many::<HttpRequest>(HttpRequestIden::WorkspaceId, &workspace.id, None)? {
+        for m in self.find_many(HttpRequestIden::WorkspaceId, &workspace.id, None)? {
             self.delete_http_request(&m, source)?;
         }
-        
-        for m in self.find_many::<GrpcRequest>(GrpcRequestIden::WorkspaceId, &workspace.id, None)? {
+
+        for m in self.find_many(GrpcRequestIden::WorkspaceId, &workspace.id, None)? {
             self.delete_grpc_request(&m, source)?;
         }
-        
-        for m in
-            self.find_many::<WebsocketRequest>(WebsocketRequestIden::FolderId, &workspace.id, None)?
-        {
+
+        for m in self.find_many(WebsocketRequestIden::FolderId, &workspace.id, None)? {
             self.delete_websocket_request(&m, source)?;
         }
-        
-        for folder in self.find_many::<Folder>(FolderIden::WorkspaceId, &workspace.id, None)? {
-            self.delete_folder(&folder, source)?;
+
+        for m in self.find_many(FolderIden::WorkspaceId, &workspace.id, None)? {
+            self.delete_folder(&m, source)?;
         }
-        
+
+        for m in self.find_many(EnvironmentIden::WorkspaceId, &workspace.id, None)? {
+            self.delete_environment(&m, source)?;
+        }
+
         self.delete(workspace, source)
     }
 
@@ -62,5 +66,16 @@ impl<'a> DbContext<'a> {
 
     pub fn upsert_workspace(&self, w: &Workspace, source: &UpdateSource) -> Result<Workspace> {
         self.upsert(w, source)
+    }
+
+    pub fn resolve_auth_for_workspace(
+        &self,
+        workspace: &Workspace,
+    ) -> (Option<String>, BTreeMap<String, Value>) {
+        (workspace.authentication_type.clone(), workspace.authentication.clone())
+    }
+
+    pub fn resolve_headers_for_workspace(&self, workspace: &Workspace) -> Vec<HttpRequestHeader> {
+        workspace.headers.clone()
     }
 }

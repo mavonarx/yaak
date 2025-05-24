@@ -1,6 +1,6 @@
+import type { EditorView } from '@codemirror/view';
 import type { Color } from '@yaakapp/api';
 import classNames from 'classnames';
-import type { EditorView } from 'codemirror';
 import type { ReactNode } from 'react';
 import {
   forwardRef,
@@ -11,15 +11,20 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createFastMutation } from '../../hooks/useFastMutation';
 import { useIsEncryptionEnabled } from '../../hooks/useIsEncryptionEnabled';
 import { useStateWithDeps } from '../../hooks/useStateWithDeps';
+import { copyToClipboard } from '../../lib/copy';
 import {
   analyzeTemplate,
   convertTemplateToInsecure,
   convertTemplateToSecure,
 } from '../../lib/encryption';
 import { generateId } from '../../lib/generateId';
-import { withEncryptionEnabled } from '../../lib/setupOrConfigureEncryption';
+import {
+  setupOrConfigureEncryption,
+  withEncryptionEnabled,
+} from '../../lib/setupOrConfigureEncryption';
 import { Button } from './Button';
 import type { DropdownItem } from './Dropdown';
 import { Dropdown } from './Dropdown';
@@ -28,6 +33,7 @@ import { Editor } from './Editor/Editor';
 import type { IconProps } from './Icon';
 import { Icon } from './Icon';
 import { IconButton } from './IconButton';
+import { IconTooltip } from './IconTooltip';
 import { Label } from './Label';
 import { HStack } from './Stacks';
 
@@ -35,6 +41,7 @@ export type InputProps = Pick<
   EditorProps,
   | 'language'
   | 'autocomplete'
+  | 'forcedEnvironmentId'
   | 'forceUpdateKey'
   | 'disabled'
   | 'autoFocus'
@@ -65,7 +72,7 @@ export type InputProps = Pick<
   placeholder?: string;
   required?: boolean;
   rightSlot?: ReactNode;
-  size?: 'xs' | 'sm' | 'md' | 'auto';
+  size?: '2xs' | 'xs' | 'sm' | 'md' | 'auto';
   stateKey: EditorProps['stateKey'];
   tint?: Color;
   type?: 'text' | 'password';
@@ -125,13 +132,29 @@ const BaseInput = forwardRef<EditorView, InputProps>(function InputBase(
 
   useImperativeHandle<EditorView | null, EditorView | null>(ref, () => editorRef.current);
 
+  const lastWindowFocus = useRef<number>(0);
+  useEffect(() => {
+    const fn = () => (lastWindowFocus.current = Date.now());
+    window.addEventListener('focus', fn);
+    return () => {
+      window.removeEventListener('focus', fn);
+    };
+  }, []);
+
   const handleFocus = useCallback(() => {
     if (readOnly) return;
+
+    // Select all text of input when it's focused to match standard browser behavior.
+    // This should not, however, select when the input is focused due to a window focus event, so
+    // we handle that case as well.
+    const windowJustFocused = Date.now() - lastWindowFocus.current < 200;
+    if (!windowJustFocused) {
+      editorRef.current?.dispatch({
+        selection: { anchor: 0, head: editorRef.current.state.doc.length },
+      });
+    }
+
     setFocused(true);
-    // Select all text on focus
-    editorRef.current?.dispatch({
-      selection: { anchor: 0, head: editorRef.current.state.doc.length },
-    });
     onFocus?.();
   }, [onFocus, readOnly]);
 
@@ -213,6 +236,7 @@ const BaseInput = forwardRef<EditorView, InputProps>(function InputBase(
           size === 'md' && 'min-h-md',
           size === 'sm' && 'min-h-sm',
           size === 'xs' && 'min-h-xs',
+          size === '2xs' && 'min-h-2xs',
         )}
       >
         {tint != null && (
@@ -314,7 +338,10 @@ function EncryptionInput({
     value: string | null;
     security: ReturnType<typeof analyzeTemplate> | null;
     obscured: boolean;
-  }>({ fieldType: 'encrypted', value: null, security: null, obscured: true }, [ogForceUpdateKey]);
+    error: string | null;
+  }>({ fieldType: 'encrypted', value: null, security: null, obscured: true, error: null }, [
+    ogForceUpdateKey,
+  ]);
 
   const forceUpdateKey = `${ogForceUpdateKey}::${state.fieldType}::${state.value === null}`;
 
@@ -327,25 +354,48 @@ function EncryptionInput({
     const security = analyzeTemplate(defaultValue ?? '');
     if (analyzeTemplate(defaultValue ?? '') === 'global_secured') {
       // Lazily update value to decrypted representation
-      convertTemplateToInsecure(defaultValue ?? '').then((value) => {
-        setState({ fieldType: 'encrypted', security, value, obscured: true });
+      templateToInsecure.mutate(defaultValue ?? '', {
+        onSuccess: (value) => {
+          setState({ fieldType: 'encrypted', security, value, obscured: true, error: null });
+        },
+        onError: (value) => {
+          setState({
+            fieldType: 'encrypted',
+            security,
+            value: null,
+            error: String(value),
+            obscured: true,
+          });
+        },
       });
     } else if (isEncryptionEnabled && !defaultValue) {
       // Default to encrypted field for new encrypted inputs
-      setState({ fieldType: 'encrypted', security, value: '', obscured: true });
+      setState({ fieldType: 'encrypted', security, value: '', obscured: true, error: null });
     } else if (isEncryptionEnabled) {
       // Don't obscure plain text when encryption is enabled
-      setState({ fieldType: 'text', security, value: defaultValue ?? '', obscured: false });
+      setState({
+        fieldType: 'text',
+        security,
+        value: defaultValue ?? '',
+        obscured: false,
+        error: null,
+      });
     } else {
       // Don't obscure plain text when encryption is disabled
-      setState({ fieldType: 'text', security, value: defaultValue ?? '', obscured: true });
+      setState({
+        fieldType: 'text',
+        security,
+        value: defaultValue ?? '',
+        obscured: true,
+        error: null,
+      });
     }
   }, [defaultValue, isEncryptionEnabled, setState, state.value]);
 
   const handleChange = useCallback(
     (value: string, fieldType: PasswordFieldType) => {
       if (fieldType === 'encrypted') {
-        convertTemplateToSecure(value).then((value) => onChange?.(value));
+        templateToSecure.mutate(value, { onSuccess: (value) => onChange?.(value) });
       } else {
         onChange?.(value);
       }
@@ -354,7 +404,7 @@ function EncryptionInput({
         const security = fieldType === 'encrypted' ? 'global_secured' : analyzeTemplate(value);
         // Reset obscured value when the field type is being changed
         const obscured = fieldType === s.fieldType ? s.obscured : fieldType !== 'text';
-        return { fieldType, value, security, obscured };
+        return { fieldType, value, security, obscured, error: s.error };
       });
     },
     [onChange, setState],
@@ -387,19 +437,32 @@ function EncryptionInput({
   const dropdownItems = useMemo<DropdownItem[]>(
     () => [
       {
-        label: state.obscured ? 'Reveal value' : 'Conceal value',
+        label: state.obscured ? 'Reveal' : 'Conceal',
         disabled: isEncryptionEnabled && state.fieldType === 'text',
         leftSlot: <Icon icon={state.obscured ? 'eye' : 'eye_closed'} />,
         onSelect: () => setState((s) => ({ ...s, obscured: !s.obscured })),
       },
+      {
+        label: 'Copy',
+        leftSlot: <Icon icon="copy" />,
+        hidden: !state.value,
+        onSelect: () => copyToClipboard(state.value ?? ''),
+      },
       { type: 'separator' },
       {
-        label: state.fieldType === 'text' ? 'Encrypt Value' : 'Decrypt Value',
+        label: state.fieldType === 'text' ? 'Encrypt Field' : 'Decrypt Field',
         leftSlot: <Icon icon={state.fieldType === 'text' ? 'lock' : 'lock_open'} />,
         onSelect: () => handleFieldTypeChange(state.fieldType === 'text' ? 'encrypted' : 'text'),
       },
     ],
-    [handleFieldTypeChange, isEncryptionEnabled, setState, state.fieldType, state.obscured],
+    [
+      handleFieldTypeChange,
+      isEncryptionEnabled,
+      setState,
+      state.fieldType,
+      state.obscured,
+      state.value,
+    ],
   );
 
   let tint: InputProps['tint'];
@@ -446,6 +509,23 @@ function EncryptionInput({
 
   const type = state.obscured ? 'password' : 'text';
 
+  if (state.error) {
+    return (
+      <Button
+        variant="border"
+        color="danger"
+        size={props.size}
+        className="text-sm"
+        rightSlot={<IconTooltip content={state.error} icon="alert_triangle" />}
+        onClick={() => {
+          setupOrConfigureEncryption();
+        }}
+      >
+        {state.error.replace(/^Render Error: /i, '')}
+      </Button>
+    );
+  }
+
   return (
     <BaseInput
       disableObscureToggle
@@ -457,8 +537,20 @@ function EncryptionInput({
       tint={tint}
       type={type}
       rightSlot={rightSlot}
+      disabled={state.error != null}
       className="pr-1.5" // To account for encryption dropdown
       {...props}
     />
   );
 }
+
+const templateToSecure = createFastMutation({
+  mutationKey: ['template-to-secure'],
+  mutationFn: convertTemplateToSecure,
+});
+
+const templateToInsecure = createFastMutation({
+  mutationKey: ['template-to-insecure'],
+  mutationFn: convertTemplateToInsecure,
+  disableToastError: true,
+});

@@ -2,16 +2,16 @@ import { defaultKeymap, historyField, indentWithTab } from '@codemirror/commands
 import { foldState, forceParsing } from '@codemirror/language';
 import type { EditorStateConfig, Extension } from '@codemirror/state';
 import { Compartment, EditorState } from '@codemirror/state';
-import { keymap, placeholder as placeholderExt, tooltips } from '@codemirror/view';
+import { EditorView, keymap, placeholder as placeholderExt, tooltips } from '@codemirror/view';
 import { emacs } from '@replit/codemirror-emacs';
 import { vim } from '@replit/codemirror-vim';
+
 import { vscodeKeymap } from '@replit/codemirror-vscode-keymap';
 import type { EditorKeymap, EnvironmentVariable } from '@yaakapp-internal/models';
 import { settingsAtom } from '@yaakapp-internal/models';
 import type { EditorLanguage, TemplateFunction } from '@yaakapp-internal/plugins';
 import { parseTemplate } from '@yaakapp-internal/templates';
 import classNames from 'classnames';
-import { EditorView } from 'codemirror';
 import { useAtomValue } from 'jotai';
 import { md5 } from 'js-md5';
 import type { MutableRefObject, ReactNode } from 'react';
@@ -26,7 +26,8 @@ import {
   useMemo,
   useRef,
 } from 'react';
-import { useActiveEnvironmentVariables } from '../../../hooks/useActiveEnvironmentVariables';
+import { activeEnvironmentIdAtom } from '../../../hooks/useActiveEnvironment';
+import { useEnvironmentVariables } from '../../../hooks/useEnvironmentVariables';
 import { useRequestEditor } from '../../../hooks/useRequestEditor';
 import { useTemplateFunctionCompletionOptions } from '../../../hooks/useTemplateFunctions';
 import { showDialog } from '../../../lib/dialog';
@@ -69,6 +70,7 @@ export interface EditorProps {
   disableTabIndent?: boolean;
   disabled?: boolean;
   extraExtensions?: Extension[];
+  forcedEnvironmentId?: string;
   forceUpdateKey?: string | number;
   format?: (v: string) => Promise<string>;
   heightMode?: 'auto' | 'full';
@@ -108,6 +110,7 @@ export const Editor = forwardRef<EditorView | undefined, EditorProps>(function E
     disableTabIndent,
     disabled,
     extraExtensions,
+    forcedEnvironmentId,
     forceUpdateKey,
     format,
     heightMode,
@@ -130,7 +133,9 @@ export const Editor = forwardRef<EditorView | undefined, EditorProps>(function E
 ) {
   const settings = useAtomValue(settingsAtom);
 
-  const allEnvironmentVariables = useActiveEnvironmentVariables();
+  const activeEnvironmentId = useAtomValue(activeEnvironmentIdAtom);
+  const environmentId = forcedEnvironmentId ?? activeEnvironmentId ?? null;
+  const allEnvironmentVariables = useEnvironmentVariables(environmentId);
   const environmentVariables = autocompleteVariables ? allEnvironmentVariables : emptyVariables;
   const useTemplating = !!(autocompleteFunctions || autocompleteVariables || autocomplete);
 
@@ -404,7 +409,6 @@ export const Editor = forwardRef<EditorView | undefined, EditorProps>(function E
           onClickMissingVariable,
           onClickPathParameter,
         });
-
         const extensions = [
           languageCompartment.of(langExt),
           placeholderCompartment.current.of(placeholderExt(placeholderElFromText(placeholder))),

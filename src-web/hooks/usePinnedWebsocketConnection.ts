@@ -35,13 +35,6 @@ export const activeWebsocketConnectionAtom = atom<WebsocketConnection | null>((g
   return activeConnections.find((c) => c.id === pinnedConnectionId) ?? activeConnections[0] ?? null;
 });
 
-export const activeWebsocketEventsAtom = atom(async (get) => {
-  const connection = get(activeWebsocketConnectionAtom);
-  return invoke<WebsocketEvent[]>('plugin:yaak-models|websocket_events', {
-    connectionId: connection?.id ?? 'n/a',
-  });
-});
-
 export function setPinnedWebsocketConnectionId(id: string | null) {
   const activeRequestId = jotaiStore.get(activeRequestIdAtom);
   const activeConnections = jotaiStore.get(activeWebsocketConnectionsAtom);
@@ -56,6 +49,11 @@ export function useWebsocketEvents(connectionId: string | null) {
   const events = useAtomValue(websocketEventsAtom);
 
   useEffect(() => {
+    if (connectionId == null) {
+      replaceModelsInStore('websocket_event', []);
+      return;
+    }
+
     invoke<WebsocketEvent[]>('plugin:yaak-models|websocket_events', { connectionId }).then(
       (events) => replaceModelsInStore('websocket_event', events),
     );

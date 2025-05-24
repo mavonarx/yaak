@@ -1,6 +1,6 @@
 import classNames from 'classnames';
-import * as m from 'motion/react-m';
 import { atom } from 'jotai';
+import * as m from 'motion/react-m';
 import type {
   CSSProperties,
   FocusEvent as ReactFocusEvent,
@@ -34,9 +34,10 @@ import { Overlay } from '../Overlay';
 import { Button } from './Button';
 import { HotKey } from './HotKey';
 import { Icon } from './Icon';
+import { LoadingIcon } from './LoadingIcon';
 import { Separator } from './Separator';
 import { HStack, VStack } from './Stacks';
-import { LoadingIcon } from './LoadingIcon';
+import { ErrorBoundary } from '../ErrorBoundary';
 
 export type DropdownItemSeparator = {
   type: 'separator';
@@ -202,17 +203,19 @@ export const Dropdown = forwardRef<DropdownRef, DropdownProps>(function Dropdown
   return (
     <>
       {child}
-      <Menu
-        ref={menuRef}
-        showTriangle
-        triggerRef={buttonRef}
-        fullWidth={fullWidth}
-        defaultSelectedIndex={defaultSelectedIndex}
-        items={items}
-        triggerShape={triggerRect ?? null}
-        onClose={() => setIsOpen(false)}
-        isOpen={isOpen}
-      />
+      <ErrorBoundary name={`Dropdown Menu`}>
+        <Menu
+          ref={menuRef}
+          showTriangle
+          triggerRef={buttonRef}
+          fullWidth={fullWidth}
+          defaultSelectedIndex={defaultSelectedIndex}
+          items={items}
+          triggerShape={triggerRect ?? null}
+          onClose={() => setIsOpen(false)}
+          isOpen={isOpen}
+        />
+      </ErrorBoundary>
     </>
   );
 });

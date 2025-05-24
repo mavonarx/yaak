@@ -1,10 +1,9 @@
 import type { GrpcEvent, GrpcRequest } from '@yaakapp-internal/models';
 import classNames from 'classnames';
 import { format } from 'date-fns';
-import { useAtomValue , useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import type { CSSProperties } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useCopy } from '../hooks/useCopy';
 import {
   activeGrpcConnectionAtom,
   activeGrpcConnections,
@@ -12,20 +11,22 @@ import {
   useGrpcEvents,
 } from '../hooks/usePinnedGrpcConnection';
 import { useStateWithDeps } from '../hooks/useStateWithDeps';
+import { copyToClipboard } from '../lib/copy';
 import { AutoScroller } from './core/AutoScroller';
 import { Banner } from './core/Banner';
 import { Button } from './core/Button';
+import { Editor } from './core/Editor/Editor';
+import { HotKeyList } from './core/HotKeyList';
 import { Icon } from './core/Icon';
 import { IconButton } from './core/IconButton';
-import { JsonAttributeTree } from './core/JsonAttributeTree';
 import { KeyValueRow, KeyValueRows } from './core/KeyValueRow';
 import { LoadingIcon } from './core/LoadingIcon';
 import { Separator } from './core/Separator';
 import { SplitLayout } from './core/SplitLayout';
 import { HStack, VStack } from './core/Stacks';
 import { EmptyStateText } from './EmptyStateText';
+import { ErrorBoundary } from './ErrorBoundary';
 import { RecentGrpcConnectionsDropdown } from './RecentGrpcConnectionsDropdown';
-import { HotKeyList } from './core/HotKeyList';
 
 interface Props {
   style?: CSSProperties;
@@ -48,7 +49,6 @@ export function GrpcResponsePane({ style, methodType, activeRequest }: Props) {
   const activeConnection = useAtomValue(activeGrpcConnectionAtom);
   const events = useGrpcEvents(activeConnection?.id ?? null);
   const setPinnedGrpcConnectionId = useSetAtom(pinnedGrpcConnectionIdAtom);
-  const copy = useCopy();
 
   const activeEvent = useMemo(
     () => events.find((m) => m.id === activeEventId) ?? null,
@@ -93,27 +93,29 @@ export function GrpcResponsePane({ style, methodType, activeRequest }: Props) {
                 />
               </div>
             </HStack>
-            <AutoScroller
-              data={events}
-              header={
-                activeConnection.error && (
-                  <Banner color="danger" className="m-3">
-                    {activeConnection.error}
-                  </Banner>
-                )
-              }
-              render={(event) => (
-                <EventRow
-                  key={event.id}
-                  event={event}
-                  isActive={event.id === activeEventId}
-                  onClick={() => {
-                    if (event.id === activeEventId) setActiveEventId(null);
-                    else setActiveEventId(event.id);
-                  }}
-                />
-              )}
-            />
+            <ErrorBoundary name="GRPC Events">
+              <AutoScroller
+                data={events}
+                header={
+                  activeConnection.error && (
+                    <Banner color="danger" className="m-3">
+                      {activeConnection.error}
+                    </Banner>
+                  )
+                }
+                render={(event) => (
+                  <EventRow
+                    key={event.id}
+                    event={event}
+                    isActive={event.id === activeEventId}
+                    onClick={() => {
+                      if (event.id === activeEventId) setActiveEventId(null);
+                      else setActiveEventId(event.id);
+                    }}
+                  />
+                )}
+              />
+            </ErrorBoundary>
           </div>
         )
       }
@@ -136,7 +138,7 @@ export function GrpcResponsePane({ style, methodType, activeRequest }: Props) {
                           title="Copy message"
                           icon="copy"
                           size="xs"
-                          onClick={() => copy(activeEvent.content)}
+                          onClick={() => copyToClipboard(activeEvent.content)}
                         />
                       </div>
                       {!showLarge && activeEvent.content.length > 1000 * 1000 ? (
@@ -161,7 +163,13 @@ export function GrpcResponsePane({ style, methodType, activeRequest }: Props) {
                           </div>
                         </VStack>
                       ) : (
-                        <JsonAttributeTree attrValue={JSON.parse(activeEvent?.content ?? '{}')} />
+                        <Editor
+                          language="json"
+                          defaultValue={activeEvent.content ?? ''}
+                          wrapLines={false}
+                          readOnly={true}
+                          stateKey={null}
+                        />
                       )}
                     </>
                   ) : (
